@@ -6,6 +6,8 @@ import os
 #to make directories
 import pathlib
 from skimage import transform
+from PIL import Image
+
 
 class dataloaderObj:
 
@@ -39,6 +41,80 @@ class dataloaderObj:
         # min-max norm on total 3D volume
         final_image_data=(image_data-min_val_1p)/(max_val_99p-min_val_1p)
         return final_image_data
+
+    def load_prostate_imgs_2d_as_3d(self, study_id_list, ret_affine=0, label_present=1):
+        """
+        Load prostate 2D image and process it as if it were 3D, with normalization and optional labels.
+        input params:
+            study_id_list: subject id number of the image to be loaded
+            ret_affine: to enable returning of a placeholder for affine transformation matrix
+            label_present: to enable loading of 2D mask if the label is present or not (0 is used for unlabeled images)
+        returns:
+            image_data_test_sys: normalized '3D' image (2D image with an added dimension)
+            label_data_test_sys: 2D label mask of the image processed as '3D' (if present)
+            pixel_size: pixel dimensions of the loaded image (assuming square pixels)
+            affine_tst: placeholder for affine transformation matrix
+        """
+        
+        pixel_size = (1, 1)  # Example pixel size in mm
+        affine_tst = np.eye(3)  # Placeholder for affine matrix
+
+        for study_id in study_id_list:
+            img_path = os.path.join(str(self.data_path_tr)+'/img', str(study_id) + '.png')
+            seg_path = os.path.join(str(self.data_path_tr)+'/label', str(study_id) + '.png')
+
+            # Load the 2D image and convert it into a '3D' array by adding a new axis
+            image_data_test_sys = Image.open(img_path).convert('L')
+            image_data_test_sys = np.array(image_data_test_sys)
+            image_data_test_sys = np.expand_dims(image_data_test_sys, axis=-1)  # Adds a new axis
+
+            # Normalize input data using percentile normalization
+            image_data_test_sys = self.normalize_minmax_data(image_data_test_sys, min_val=1, max_val=99)
+
+            if label_present == 1:
+                # Load the segmentation mask and convert to '3D'
+                label_data_test_sys = Image.open(seg_path)
+                label_data_test_sys = np.array(label_data_test_sys)
+                label_data_test_sys = np.expand_dims(label_data_test_sys, axis=-1)  # Adds a new axis
+            else:
+                label_data_test_sys = None  # No label mask loaded
+
+            if ret_affine == 0:
+                if label_present == 1:
+                    return image_data_test_sys, label_data_test_sys, pixel_size
+                else:
+                    return image_data_test_sys, pixel_size
+            else:
+                if label_present == 1:
+                    return image_data_test_sys, label_data_test_sys, pixel_size, affine_tst
+                else:
+                    return image_data_test_sys, pixel_size, affine_tst
+
+        # # Load the 2D image
+        # image_data_test_load = Image.open(img_path)
+        # image_data_test_sys=np.array(image_data_test_load)
+        # pixel_size=(1,1)
+        # affine_tst=np.eye(4)
+        # image_data_test_sys = image_data_test_sys[:, :, 0]
+
+        # image_data_test_sys = self.normalize_minmax_data(image_data_test_sys)
+
+        # if(label_present==1):
+        #     # Load the segmentation mask
+        #     label_data_test_load = Image.open(seg_path)
+        #     label_data_test_sys=np.array(label_data_test_load)
+
+        # if(label_present==0):
+        #     if(ret_affine==0):
+        #         return image_data_test_sys,pixel_size
+        #     else:
+        #         return image_data_test_sys,pixel_size,affine_tst
+        # else:
+        #     if(ret_affine==0):
+        #         return image_data_test_sys,label_data_test_sys,pixel_size
+        #     else:
+        #         return image_data_test_sys,label_data_test_sys,pixel_size,affine_tst
+        
 
     def load_acdc_imgs(self, study_id_list,ret_affine=0,label_present=1):
         """
@@ -151,6 +227,7 @@ class dataloaderObj:
 
         #Load Prostate data images and its labels with pixel dimensions
         print('PZ Decathlon')
+        print('study_id_list',study_id_list)
         for study_id in study_id_list:
             img_path=str(self.data_path_tr)+str(study_id)+'/img.nii.gz'
             seg_path=str(self.data_path_tr)+str(study_id)+'/mask.nii.gz'
@@ -296,6 +373,21 @@ class dataloaderObj:
             return cropped_img,cropped_mask
         else:
             return cropped_img
+    
+    def preprocess_data_2d(self, img, mask, pixel_size, label_present=1):
+        nx, ny = self.size
+        scale_vector = [pixel_size[0] / self.target_resolution[0], pixel_size[1] / self.target_resolution[1]]
+
+        img_rescaled = transform.rescale(img, scale_vector, order=1, preserve_range=True, mode='constant')
+        img_cropped = self.crop_or_pad_slice_to_size(img_rescaled, nx, ny)
+
+        if label_present:
+            mask_rescaled = transform.rescale(mask, scale_vector, order=0, preserve_range=True, mode='constant')
+            mask_cropped = self.crop_or_pad_slice_to_size(mask_rescaled, nx, ny)
+            return img_cropped, mask_cropped
+
+        return img_cropped
+
 
     # def load_acdc_cropped_img_labels(self, train_ids_list,label_present=1):
     #    """
@@ -331,43 +423,37 @@ class dataloaderObj:
     #    else:
     #        return img_cat
 
-    def load_cropped_img_labels(self, train_ids_list,label_present=1):
-       """
-       # Load the already created and stored a-priori acdc/prostate/mmwhs image and its labels that are pre-processed: normalized and cropped to chosen dimensions
-       input params :
-           train_ids_list : patient ids of the image and label pairs to be loaded
-           label_present : to indicate if the image has labels provided or not (used for unlabeled images)
-       returns:
-           img_cat : stack of 3D images of all the patient id nos.
-           mask_cat : corresponding stack of 3D segmentation masks of all the patient id nos.
-       """
-       count=0
-       for study_id in train_ids_list:
+    def load_cropped_img_labels(self, train_ids_list, label_present=1, target_size=(224, 224)):
+        img_cat = []  # 初始化图像堆叠列表
+        mask_cat = []  # 初始化掩码堆叠列表
 
-           # Load the 3D image
-           img_fname = str(self.data_path_tr_cropped)+str(study_id)+'/img_cropped.nii.gz'
-           img_tmp_load = nib.load(img_fname)
-           img_tmp=img_tmp_load.get_data()
+        for study_id in train_ids_list:
+            # 加载2D图像
+            img_fname = os.path.join(self.data_path_tr_cropped, str(study_id), 'img_cropped.png')
+            if not os.path.exists(img_fname):
+                print("File not found:", img_fname)
+                continue  # 如果文件不存在，则跳过当前循环
+            img = Image.open(img_fname).convert('L')
+            img = img.resize(target_size)  # 重新调整图像大小
+            img_tmp = np.array(img)
 
-           #load the mask if label is present
-           if(label_present==1):
-               # Load the segmentation mask
-               mask_fname = str(self.data_path_tr_cropped)+str(study_id)+'/mask_cropped.nii.gz'
-               mask_tmp_load = nib.load(mask_fname)
-               mask_tmp=mask_tmp_load.get_data()
+            # 如果存在标签，加载掩码
+            if label_present == 1:
+                mask_fname = os.path.join(self.data_path_tr_cropped, str(study_id), 'mask_cropped.png')
+                mask = Image.open(mask_fname)
+                mask = mask.resize(target_size)  # 重新调整掩码大小
+                mask_tmp = np.array(mask)
 
-           if(count==0):
-              img_cat=img_tmp
-              if(label_present==1):
-                  mask_cat=mask_tmp
-              count=1
-           else:
-              img_cat=np.concatenate((img_cat,img_tmp),axis=2)
-              if(label_present==1):
-                  mask_cat=np.concatenate((mask_cat,mask_tmp),axis=2)
+            # 将图像和掩码添加到列表
+            img_cat.append(img_tmp)
+            if label_present == 1:
+                mask_cat.append(mask_tmp)
 
-       if(label_present==1):
-           return img_cat,mask_cat
-       else:
-           return img_cat
+        # 将列表转换为堆叠的numpy数组
+        img_cat = np.stack(img_cat, axis=0)
+        if label_present == 1:
+            mask_cat = np.stack(mask_cat, axis=0)
+            return img_cat, mask_cat
+        else:
+            return img_cat
 

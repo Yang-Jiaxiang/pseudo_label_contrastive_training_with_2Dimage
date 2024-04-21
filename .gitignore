@@ -2,4 +2,10 @@ dataset/*
 
 temp/*
 
+orig_cropped/*
+
+*__pycache__*
+
+pseudo_label_cont_lr/*
+
 *.log

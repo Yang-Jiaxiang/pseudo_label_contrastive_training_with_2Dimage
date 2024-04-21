@@ -278,65 +278,22 @@ def shuffle_minibatch(ip_list, batch_size=20,num_channels=1,labels_present=1,axi
     else:
         return image_data_train_batch
 
-def shuffle_minibatch_mtask(ip_list, batch_size=20,num_channels=1,labels_present=1,axis=2):
+def shuffle_minibatch_mtask(ip_list, batch_size=20, num_channels=1, labels_present=1, axis=0):
     '''
-        To sample a minibatch images of batch_size from all the available 3D volumes.
+    Simplified version to sample a minibatch from a set of 2D images simulated as 3D volume.
+    '''
+    image_data_train = ip_list[0]
+    label_data_train = ip_list[1] if labels_present == 1 and len(ip_list) > 1 else None
 
-        input params:
-            ip_list: list of 3d volumes and its labels if present
-            batch_size: number of 2D slices to consider for the training
-            labels_present: to indicate labels are used in 1-hot encoding format
-            num_channels : no of channels of the input image
-            axis : the axis along which we want to sample the minibatch -> axis vals : 0 - for sagittal, 1 - for coronal, 2 - for axial
-        returns:
-            image_data_train_batch: concatenated 2D slices randomly chosen from the total input data
-            label_data_train_batch: concatenated 2D slices of labels with indices corresponding to the input data selected.
-        '''
+    # Get random indices to sample from the first dimension
+    random_indices = np.random.choice(image_data_train.shape[0], size=batch_size, replace=False)
 
-    if(len(ip_list)==2 and labels_present==1):
-        image_data_train = ip_list[0]
-        label_data_train = ip_list[1]
-    elif(len(ip_list)==1 and labels_present==0):
-        image_data_train = ip_list[0]
+    # Select the images and labels based on the random indices
+    image_data_train_batch = image_data_train[random_indices]
+    label_data_train_batch = label_data_train[random_indices] if labels_present == 1 else None
 
-    if(num_channels==1):
-        img_size_x=image_data_train.shape[0]
-        img_size_y=image_data_train.shape[1]
-    else:
-        img_size_x=image_data_train.shape[1]
-        img_size_y=image_data_train.shape[2]
+    return (image_data_train_batch, label_data_train_batch) if labels_present == 1 else image_data_train_batch
 
-    len_of_train_data=np.arange(image_data_train.shape[axis])
-    #randomize=np.random.choice(len_of_train_data,size=len(len_of_train_data),replace=true)
-    randomize=np.random.choice(len_of_train_data,size=batch_size,replace=True)
-
-    count=0
-    for index_no in randomize:
-        if(num_channels==1):
-            img_train_tmp=np.reshape(image_data_train[:,:,index_no],(1,img_size_x,img_size_y,num_channels))
-            if(labels_present==1):
-                label_train_tmp=np.reshape(label_data_train[:,:,index_no],(1,img_size_x,img_size_y))
-        else:
-            img_train_tmp = np.reshape(image_data_train[index_no], (1, img_size_x, img_size_y, num_channels))
-            if(labels_present==1):
-                label_train_tmp = np.reshape(label_data_train[index_no], (1, img_size_x, img_size_y))
-
-        if(count==0):
-            image_data_train_batch=img_train_tmp
-            if(labels_present==1):
-                label_data_train_batch=label_train_tmp
-        else:
-            image_data_train_batch=np.concatenate((image_data_train_batch, img_train_tmp),axis=0)
-            if(labels_present==1):
-                label_data_train_batch=np.concatenate((label_data_train_batch, label_train_tmp),axis=0)
-
-        count=count+1
-        if(count==batch_size):
-            break
-    if(labels_present==1):
-        return image_data_train_batch, label_data_train_batch
-    else:
-        return image_data_train_batch
 
 def change_axis_img(ip_list, labels_present=1, def_axis_no=2, cat_axis=0):
     '''
@@ -404,6 +361,7 @@ def load_val_imgs(val_list,dt,orig_img_dt):
     for val_id in val_list:
         val_id_list=[val_id]
         val_img,val_label,pixel_size_val=orig_img_dt(val_id_list)
+
         #pre-process the image into chosen resolution and dimensions
         val_cropped_img,val_cropped_mask = dt.preprocess_data(val_img, val_label, pixel_size_val)
 
